@@ -28,4 +28,8 @@ public class FieldValue {
     @ManyToOne
     @JoinColumn(name = "field_id")
     Field field;
+
+    @ManyToOne
+    @JoinColumn(name = "sub_id")
+    SubField subField;
 }

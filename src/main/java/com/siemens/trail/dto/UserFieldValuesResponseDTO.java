@@ -1,6 +1,6 @@
 package com.siemens.trail.dto;
 
-import lombok.Data;
+import com.siemens.trail.model.FieldType;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -18,7 +18,17 @@ public class UserFieldValuesResponseDTO {
         @Setter @Getter
         public static class FieldValueDTO {
             private String name;
+            private FieldType type;
             private Object value;
+
+            private List<SubFieldValueDTO> values;
+
+            @Setter @Getter
+            public static class SubFieldValueDTO {
+                private String name;
+                private Object value;
+            }
+
         }
     }
 }

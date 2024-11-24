@@ -12,4 +12,5 @@ public interface FieldValueRepository extends JpaRepository<FieldValue, Long> {
 
     List<FieldValue> findAllByUserId(Long userId);
 
+    List<FieldValue> findAllByFieldId(Integer fieldId);
 }

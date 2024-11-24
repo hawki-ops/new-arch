@@ -17,5 +17,14 @@ public class AddValueDTO {
         private Long fieldID;
         private FieldType fieldType;
         private Object value;
+        private List<CompositeDTO> values;
+
+        @Getter @Setter
+        public static class CompositeDTO {
+            private Integer compositeID;
+            private FieldType fieldType;
+            private Object value;
+        }
+
     }
 }
