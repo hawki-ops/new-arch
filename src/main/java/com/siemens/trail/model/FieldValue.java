@@ -32,4 +32,8 @@ public class FieldValue {
     @ManyToOne
     @JoinColumn(name = "sub_id")
     SubField subField;
+
+    @ManyToOne
+    @JoinColumn(name = "record_id")
+    ValueRecord valueRecord;
 }

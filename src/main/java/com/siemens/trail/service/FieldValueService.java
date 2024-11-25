@@ -3,6 +3,7 @@ package com.siemens.trail.service;
 import com.siemens.trail.dto.AddValueDTO;
 import com.siemens.trail.dto.UserFieldValuesResponseDTO;
 import com.siemens.trail.model.*;
+import com.siemens.trail.model.ValueRecord;
 import com.siemens.trail.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,6 +27,7 @@ public class FieldValueService {
     private final FieldOptionRepository fieldOptionRepository;
     private final WebUserRepository webUserRepository;
     private final SubFieldRepository subFieldRepository;
+    private final RecordRepository recordRepository;
     private final SectionRepository sectionRepository;
     @Value("${image.storage.directory}")
     private String storageDirectory;
@@ -45,6 +47,8 @@ public class FieldValueService {
                     .orElseThrow(() -> new RuntimeException("Field not found"));
 
             if (valueDTO.getFieldType() == FieldType.SUB) {
+                ValueRecord valueRecord = new ValueRecord();
+                valueRecord.setValues(new ArrayList<>());
                 for (var subValue : valueDTO.getValues()) {
                     SubField subField = subFieldRepository.findById(subValue.getCompositeID())
                             .orElseThrow(() -> new RuntimeException("SubField not found"));
@@ -54,12 +58,17 @@ public class FieldValueService {
                     fieldValue.setField(field);
                     fieldValue.setSubField(subField);
 
+
                     setValue(fieldValue, subField.getType(), subValue.getValue());
+
+                    fieldValue.setValueRecord(valueRecord);
+                    valueRecord.getValues().add(fieldValue);
 
                     fieldValues.add(fieldValue);
 
                 }
 
+                recordRepository.save(valueRecord);
 
             } else {
                 FieldValue fieldValue = new FieldValue();
@@ -85,7 +94,7 @@ public class FieldValueService {
         List<FieldValue> fieldValues = fieldValueRepository.findAllByUserId(user.getId());
 
         Map<String, UserFieldValuesResponseDTO.SectionDTO> sections = new HashMap<>();
-        Map<Integer, UserFieldValuesResponseDTO.SectionDTO.FieldValueDTO > subFieldValues = new HashMap<>();
+        Map<Long, List<FieldValue>> compositeFieldGroups = new HashMap<>();
 
         for (FieldValue fieldValue : fieldValues) {
             Field field = fieldValue.getField();
@@ -98,55 +107,12 @@ public class FieldValueService {
                 return dto;
             });
 
-            if ( field.getType() == FieldType.SUB ) {
-
-                UserFieldValuesResponseDTO.SectionDTO.FieldValueDTO fieldValueDTO = subFieldValues.computeIfAbsent(Math.toIntExact(field.getId()), key -> {
-                    UserFieldValuesResponseDTO.SectionDTO.FieldValueDTO dto = new UserFieldValuesResponseDTO.SectionDTO.FieldValueDTO();
-                    dto.setName(field.getName());
-                    dto.setValues(new ArrayList<>());
-                    return dto;
-                }  );
-
-                SubField subField = fieldValue.getSubField();
-
-                UserFieldValuesResponseDTO.SectionDTO.FieldValueDTO.SubFieldValueDTO subFieldValueDTO = new UserFieldValuesResponseDTO.SectionDTO.FieldValueDTO.SubFieldValueDTO();
-
-                subFieldValueDTO.setName(subField.getName());
-
-                switch (subField.getType()) {
-                    case FILE:
-                        try {
-                            subFieldValueDTO.setValue(getImage(fieldValue.getStringValue()));
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                        break;
-                    case STRING:
-                        subFieldValueDTO.setValue(fieldValue.getStringValue());
-                        break;
-                    case OPTION:
-                        FieldOption fieldOption = fieldOptionRepository.findById(Math.toIntExact(fieldValue.getNumberValue()))
-                                .orElseThrow(() -> new RuntimeException("Option not found"));
-                        subFieldValueDTO.setValue(fieldOption.getName());
-                        break;
-                    case NUMBER:
-                        subFieldValueDTO.setValue(fieldValue.getNumberValue());
-                        break;
-                    case DATE:
-                        subFieldValueDTO.setValue(fieldValue.getDateValue());
-                        break;
-                }
-
-                fieldValueDTO.setType(field.getType());
-
-                fieldValueDTO.getValues().add(subFieldValueDTO);
-
-//                List<FieldValue> subFieldValues = fieldValueRepository.findAllBy;
-
-
-            }else {
+            if (field.getType() == FieldType.SUB) {
+                // Group FieldValues by ValueRecord ID for composite fields
+                Long recordId = fieldValue.getValueRecord().getId();
+                compositeFieldGroups.computeIfAbsent(recordId, k -> new ArrayList<>()).add(fieldValue);
+            } else {
                 UserFieldValuesResponseDTO.SectionDTO.FieldValueDTO fieldValueDTO = new UserFieldValuesResponseDTO.SectionDTO.FieldValueDTO();
-
                 fieldValueDTO.setName(field.getName());
 
                 switch (field.getType()) {
@@ -175,21 +141,56 @@ public class FieldValueService {
                 fieldValueDTO.setType(field.getType());
                 sectionDTO.getFields().add(fieldValueDTO);
             }
-
         }
 
-        // Map sections to the response DTO
+        // Process grouped composite fields
+        for (Map.Entry<Long, List<FieldValue>> entry : compositeFieldGroups.entrySet()) {
+            List<FieldValue> group = entry.getValue();
+            ValueRecord record = group.get(0).getValueRecord();
+            Field field = group.get(0).getField();
+            Section section = field.getSection();
 
+            UserFieldValuesResponseDTO.SectionDTO sectionDTO = sections.get(section.getName());
+            UserFieldValuesResponseDTO.SectionDTO.FieldValueDTO compositeFieldDTO = new UserFieldValuesResponseDTO.SectionDTO.FieldValueDTO();
+            compositeFieldDTO.setName(field.getName());
+            compositeFieldDTO.setType(field.getType());
+            compositeFieldDTO.setValues(new ArrayList<>());
 
-        for ( Map.Entry<Integer, UserFieldValuesResponseDTO.SectionDTO.FieldValueDTO> entry : subFieldValues.entrySet() ) {
-            Field field = fieldRepository.findById(Long.valueOf(entry.getKey()))
-                            .orElseThrow( () -> new RuntimeException("Field not Found") ) ;
-            sections.get(field.getSection().getName()).getFields().add(entry.getValue());
+            for (FieldValue fieldValue : group) {
+                SubField subField = fieldValue.getSubField();
+                UserFieldValuesResponseDTO.SectionDTO.FieldValueDTO.SubFieldValueDTO subFieldValueDTO = new UserFieldValuesResponseDTO.SectionDTO.FieldValueDTO.SubFieldValueDTO();
+                subFieldValueDTO.setName(subField.getName());
 
+                switch (subField.getType()) {
+                    case FILE:
+                        try {
+                            subFieldValueDTO.setValue(getImage(fieldValue.getStringValue()));
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                        break;
+                    case STRING:
+                        subFieldValueDTO.setValue(fieldValue.getStringValue());
+                        break;
+                    case OPTION:
+                        FieldOption fieldOption = fieldOptionRepository.findById(Math.toIntExact(fieldValue.getNumberValue()))
+                                .orElseThrow(() -> new RuntimeException("Option not found"));
+                        subFieldValueDTO.setValue(fieldOption.getName());
+                        break;
+                    case NUMBER:
+                        subFieldValueDTO.setValue(fieldValue.getNumberValue());
+                        break;
+                    case DATE:
+                        subFieldValueDTO.setValue(fieldValue.getDateValue());
+                        break;
+                }
+                compositeFieldDTO.getValues().add(subFieldValueDTO);
+            }
+
+            sectionDTO.getFields().add(compositeFieldDTO);
         }
 
         List<UserFieldValuesResponseDTO.SectionDTO> sectionDTOs = new ArrayList<>(sections.values());
-
         UserFieldValuesResponseDTO responseDTO = new UserFieldValuesResponseDTO();
         responseDTO.setSections(sectionDTOs);
 
