@@ -19,4 +19,7 @@ public class WebUser {
 
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     List<FieldValue> FieldValues;
+
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
+    List<FileMetaData> files;
 }
